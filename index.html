@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Respuesta Progresiva</title>
+<style>
+  #respuesta{
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 1.2rem;
+  }
+</style>
+</head>
+<body>
+<pre id="respuesta"></pre>
+
+<script>
+  // Función para cargar la respuesta progresivamente. 
+  async function cargarRespuesta() {
+    const responseContainer = document.getElementById('respuesta');
+
+    // Hacer la solicitud al servidor
+    console.log('Haciendo la solicitud al servidor');
+    const response = await fetch('http://localhost:4000/consulta-data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({consulta: 'como estara el clima estos dias? '})
+    });
+
+    // Leer los datos progresivamente y actualizar el contenido
+
+    const reader = response.body.getReader();
+    let decoder = new TextDecoder();
+    let chunk = await reader.read();
+    while (!chunk.done) {
+      const texto = decoder.decode(chunk.value, { stream: true });
+      responseContainer.textContent += texto;
+      console.log(texto);
+      chunk = await reader.read();
+    }
+  }
+
+  // Llamar a la función para cargar la respuesta progresivamente
+  cargarRespuesta();
+</script>
+</body>
+</html>
