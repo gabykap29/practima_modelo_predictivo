@@ -1,7 +1,8 @@
 import { Router } from "express";
-import generarActividad from '../controllers/consultaDatos.js'
+import { obtenerYGuardarDatosClima, prompt } from '../controllers/consultaDatos.js';
 const router = Router();
 
-router.post('/consulta-data', generarActividad);
+router.get('/consulta-data', obtenerYGuardarDatosClima);
+router.post('/consulta', prompt);
 
 export default router;

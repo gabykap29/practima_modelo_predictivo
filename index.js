@@ -1,6 +1,7 @@
-import express from "express";
-import morgan, { format } from "morgan";
 import cors from 'cors';
+import express from "express";
+import morgan from "morgan";
+import connectToDatabase from './database/db.js';
 import router from "./routes/router.js";
 
 const app = express();
@@ -11,6 +12,7 @@ app.use(morgan('combined'));
 
 app.use(router);
 
-app.listen(4000, ()=> {
-    console.log('servodidor on');
+app.listen(4000, async()=> {
+    await connectToDatabase();
+    console.log('servidor on');
 })

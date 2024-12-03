@@ -22,12 +22,12 @@
 
     // Hacer la solicitud al servidor
     console.log('Haciendo la solicitud al servidor');
-    const response = await fetch('http://localhost:4000/consulta-data', {
+    const response = await fetch('http://localhost:4000/consulta', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({consulta: 'como estara el clima estos dias? '})
+      body: JSON.stringify({consulta: 'Y mañana que tal estará?  '})
     });
 
     // Leer los datos progresivamente y actualizar el contenido
