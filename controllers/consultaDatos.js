@@ -3,9 +3,9 @@ import WeatherData from "../model/WeatherData.js";
 
 
 export async function prompt(req, res) {
-    const {consulta } = req.body;
+    const {consulta, provincia } = req.body;
   try {
-     const obtenerDatos = await obtener();
+     const obtenerDatos = await obtener(provincia);
       const peticion = await fetch('http://127.0.0.1:11434/api/generate', {
           method: "POST",
           headers: {
@@ -162,7 +162,7 @@ export async function obtenerYGuardarDatosClima(req, res) {
 }
 
   
-export async function obtener() {
+export async function obtener(provincia= 'formosa%20argentina') {
   const today = new Date().toISOString().split('T')[0];
 
   // Verificamos si ya existen los datos de hoy
@@ -188,7 +188,7 @@ export async function obtener() {
       // Llamadas paralelas a ambas APIs
       const [api1Response, api2Response] = await Promise.all([
         fetch('https://ramf.formosa.gob.ar/api/station'),
-        fetch('https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/formosa%20argentina?unitGroup=metric&key=UMQ9KWF37S9T6WL8J4WLN5Q23&contentType=json'),
+        fetch('https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/' + provincia+'?unitGroup=metric&key=UMQ9KWF37S9T6WL8J4WLN5Q23&contentType=json'),
       ]);
 
       const [api1Data, api2Data] = await Promise.all([
