@@ -72,138 +72,199 @@ export async function prompt(req, res) {
   }
 }
 // Función para obtener y guardar los datos de clima en la base de datos
+
 export async function obtenerYGuardarDatosClima(req, res) {
-    // Obtenemos la fecha actual en formato "YYYY-MM-DD"
-    const today = new Date().toISOString().split('T')[0];
-  
-    // Verificamos si ya existen los datos de hoy para la estación 1
-    const existingData = await WeatherData.find({ date: today });
-  
-    // Verificamos si no existen datos de clima para hoy
-    if (existingData.length > 0) {
-      // Si los datos de hoy ya existen, retornamos esos datos
-      console.log('Los datos de clima de hoy ya están en la base de datos');
-      return res.json(existingData);
-    } else {
-      // Si no existen, hacemos el fetch a la API para obtener los datos más recientes
-      console.log('No se encontraron datos de clima de hoy. Realizando el fetch...');
-      
-      try {
-        // Hacemos la solicitud a la API de datos meteorológicos
-        const response = await fetch('https://ramf.formosa.gob.ar/api/station');
-        const data = await response.json();  // Convertimos la respuesta en formato JSON
-        
-        // Filtramos y mapeamos los datos relevantes para almacenarlos
-        const filteredData = data.map((dato) => ({
-          station_id: uuidv4(),
-          date: today,  // Usamos la fecha de hoy para este documento
-          data: {
-            timestamp: dato.dates?.max_date || null,
-            temperature: dato.meta?.airTemp || null,
-            humidity: dato.meta?.rh || null,
-            rain1h: dato.meta?.rain1h || null,
-            rain24h: (dato.meta?.rain24h && typeof dato.meta.rain24h === 'object') ? dato.meta.rain24h.sum : dato.meta?.rain24h || null, // Extraemos solo el 'sum'
-            rainCurrentDay: (dato.meta?.rainCurrentDay && typeof dato.meta.rainCurrentDay === 'object') ? dato.meta.rainCurrentDay.sum : dato.meta?.rainCurrentDay || null, // Extraemos solo el 'sum'
-            windSpeed: dato.meta?.windSpeed || null,
-            battery: dato.meta?.battery || null,
-            solarPanel: dato.meta?.solarPanel || null,
-            location: {
-              latitude: dato.position?.geo?.coordinates[1] || null,
-              longitude: dato.position?.geo?.coordinates[0] || null,
-            },
-            warnings: dato.warnings || [],  // Si hay advertencias, las agregamos
-            sensors: dato.sensors || [],  // Si hay sensores, los agregamos
-            sms_numbers: dato.sms_numbers || [],  // Si hay números de teléfono, los agregamos
-            licenses: dato.licenses || false,  // Usamos false si no hay información de licencias
-          },
-        }));
-  
-        // Guardamos los datos filtrados en la base de datos
-        const savedData = await WeatherData.insertMany(filteredData);
-        console.log('Datos de clima guardados en la base de datos');
-        return res.json(savedData);  // Retornamos los datos que hemos guardado
-      } catch (error) {
-        console.error('Error al obtener o guardar los datos de clima:', error);
-        return res.status(500).send('Hubo un error al obtener o guardar los datos de clima');
-      }
-    }
+  const today = new Date().toISOString().split('T')[0];
+
+  // Verificamos si ya existen los datos de hoy
+  const existingData = await WeatherData.find({ date: today });
+
+  if (existingData.length > 0) {
+    console.log('Los datos de clima de hoy ya están en la base de datos');
+    return res.json(existingData);
   }
+
+  try {
+    // Llamadas paralelas a ambas APIs
+    const [api1Response, api2Response] = await Promise.all([
+      fetch('https://ramf.formosa.gob.ar/api/station'),
+      fetch('https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/formosa%20argentina?unitGroup=metric&key=UMQ9KWF37S9T6WL8J4WLN5Q23&contentType=json')
+    ]);
+
+    const [api1Data, api2Data] = await Promise.all([
+      api1Response.json(),
+      api2Response.json()
+    ]);
+
+    // Procesamos los datos de la API 1
+    const datosApi1 = api1Data.map((dato) => ({
+      station_id: uuidv4(),
+      date: today,
+      data: {
+        timestamp: dato.dates?.max_date || null,
+        temperature: dato.meta?.airTemp || null,
+        humidity: dato.meta?.rh || null,
+        rain1h: dato.meta?.rain1h || null,
+        rain24h: typeof dato.meta?.rain24h === 'object' ? dato.meta.rain24h.sum : dato.meta?.rain24h || null,
+        windSpeed: dato.meta?.windSpeed || null,
+        location: {
+          latitude: dato.position?.geo?.coordinates[1] || null,
+          longitude: dato.position?.geo?.coordinates[0] || null,
+        },
+        warnings: dato.warnings || [],
+      },
+    }));
+
+    // Procesamos los datos de la API 2 (Visual Crossing)
+    const currentConditions = api2Data.currentConditions;
+    const datosApi2 = {
+      station_id: uuidv4(),
+      date: today,
+      data: {
+        timestamp: currentConditions.datetime || null,
+        temperature: currentConditions.temp || null,
+        feelslike: currentConditions.feelslike || null,
+        humidity: currentConditions.humidity || null,
+        dewPoint: currentConditions.dew || null,
+        precipitation: currentConditions.precip || null,
+        windSpeed: currentConditions.windspeed || null,
+        windDirection: currentConditions.winddir || null,
+        pressure: currentConditions.pressure || null,
+        visibility: currentConditions.visibility || null,
+        cloudCover: currentConditions.cloudcover || null,
+        solarRadiation: currentConditions.solarradiation || null,
+        uvIndex: currentConditions.uvindex || null,
+        sunrise: api2Data.days[0]?.sunrise || null,
+        sunset: api2Data.days[0]?.sunset || null,
+        conditions: currentConditions.conditions || null,
+        icon: currentConditions.icon || null,
+      },
+    };
+
+    // Combinamos los datos de ambas APIs
+    const combinedData = datosApi1.map((dato) => ({
+      ...dato,
+      data: {
+        ...dato.data,
+        additionalDataFromVisualCrossing: datosApi2.data, // Enlaza datos adicionales de Visual Crossing
+      },
+    }));
+
+    // Guardamos los datos en la base de datos
+    const savedData = await WeatherData.insertMany(combinedData);
+    console.log('Datos de clima guardados en la base de datos');
+    return res.json(savedData);
+
+  } catch (error) {
+    console.error('Error al obtener o guardar los datos de clima:', error);
+    return res.status(500).send('Hubo un error al obtener o guardar los datos de clima');
+  }
+}
+
   
-  export async function obtener() {
-    // Obtenemos la fecha actual en formato "YYYY-MM-DD"
-    const today = new Date().toISOString().split('T')[0];
-  
-    // Verificamos si ya existen los datos de hoy para la estación 1
-    const existingData = await WeatherData.find({ date: today });
-  
-    // Verificamos si no existen datos de clima para hoy
-    if (existingData.length > 0) {
-      // Si los datos de hoy ya existen, los retornamos en formato simplificado
-      console.log('Los datos de clima de hoy ya están en la base de datos');
-      
-      // Retornamos los datos resumidos en formato texto
-      const summary = existingData.map(dato => ({
+export async function obtener() {
+  const today = new Date().toISOString().split('T')[0];
+
+  // Verificamos si ya existen los datos de hoy
+  const existingData = await WeatherData.find({ date: today });
+
+  if (existingData.length > 0) {
+    console.log('Los datos de clima de hoy ya están en la base de datos');
+
+    // Retornamos los datos en formato texto resumido
+    const summary = existingData.map((dato) => ({
+      date: dato.date,
+      temperature: dato.data.temperature,
+      humidity: dato.data.humidity,
+      rain1h: dato.data.rain1h,
+      rain24h: dato.data.rain24h,
+      windSpeed: dato.data.windSpeed,
+    }));
+    return JSON.stringify(summary);
+  } else {
+    console.log('No se encontraron datos de clima de hoy. Realizando el fetch...');
+
+    try {
+      // Llamadas paralelas a ambas APIs
+      const [api1Response, api2Response] = await Promise.all([
+        fetch('https://ramf.formosa.gob.ar/api/station'),
+        fetch('https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/formosa%20argentina?unitGroup=metric&key=UMQ9KWF37S9T6WL8J4WLN5Q23&contentType=json'),
+      ]);
+
+      const [api1Data, api2Data] = await Promise.all([
+        api1Response.json(),
+        api2Response.json(),
+      ]);
+
+      // Procesamos datos de la API 1
+      const datosApi1 = api1Data.map((dato) => ({
+        station_id: uuidv4(),
+        date: today,
+        data: {
+          timestamp: dato.dates?.max_date || null,
+          temperature: dato.meta?.airTemp || null,
+          humidity: dato.meta?.rh || null,
+          rain1h: dato.meta?.rain1h || null,
+          rain24h: typeof dato.meta?.rain24h === 'object' ? dato.meta.rain24h.sum : dato.meta?.rain24h || null,
+          windSpeed: dato.meta?.windSpeed || null,
+          location: {
+            latitude: dato.position?.geo?.coordinates[1] || null,
+            longitude: dato.position?.geo?.coordinates[0] || null,
+          },
+        },
+      }));
+
+      // Procesamos datos de la API 2 (Visual Crossing)
+      const currentConditions = api2Data.currentConditions;
+      const datosApi2 = {
+        station_id: uuidv4(),
+        date: today,
+        data: {
+          timestamp: currentConditions.datetime || null,
+          temperature: currentConditions.temp || null,
+          feelslike: currentConditions.feelslike || null,
+          humidity: currentConditions.humidity || null,
+          dewPoint: currentConditions.dew || null,
+          precipitation: currentConditions.precip || null,
+          windSpeed: currentConditions.windspeed || null,
+          windDirection: currentConditions.winddir || null,
+          pressure: currentConditions.pressure || null,
+          visibility: currentConditions.visibility || null,
+          cloudCover: currentConditions.cloudcover || null,
+          solarRadiation: currentConditions.solarradiation || null,
+          uvIndex: currentConditions.uvindex || null,
+          conditions: currentConditions.conditions || null,
+          icon: currentConditions.icon || null,
+        },
+      };
+
+      // Combinamos los datos
+      const combinedData = datosApi1.concat([datosApi2]);
+
+      // Guardamos los datos combinados en la base de datos
+      const savedData = await WeatherData.insertMany(combinedData);
+      console.log('Datos de clima guardados en la base de datos');
+
+      // Creamos el resumen de los datos
+      const summary = savedData.map((dato) => ({
         date: dato.date,
         temperature: dato.data.temperature,
         humidity: dato.data.humidity,
         rain1h: dato.data.rain1h,
         rain24h: dato.data.rain24h,
-        windSpeed: dato.data.windSpeed
+        windSpeed: dato.data.windSpeed,
+        additionalInfo: {
+          feelslike: dato.data.feelslike || null,
+          uvIndex: dato.data.uvIndex || null,
+          conditions: dato.data.conditions || null,
+        },
       }));
       return JSON.stringify(summary);
-    } else {
-      // Si no existen, hacemos el fetch a la API para obtener los datos más recientes
-      console.log('No se encontraron datos de clima de hoy. Realizando el fetch...');
-      
-      try {
-        // Hacemos la solicitud a la API de datos meteorológicos
-        const response = await fetch('https://ramf.formosa.gob.ar/api/station');
-        const data = await response.json();  // Convertimos la respuesta en formato JSON
-        
-        // Filtramos y mapeamos los datos relevantes para almacenarlos
-        const filteredData = data.map((dato) => ({
-          station_id: uuidv4(),
-          date: today,  // Usamos la fecha de hoy para este documento
-          data: {
-            timestamp: dato.dates?.max_date || null,
-            temperature: dato.meta?.airTemp || null,
-            humidity: dato.meta?.rh || null,
-            rain1h: dato.meta?.rain1h || null,
-            rain24h: (dato.meta?.rain24h && typeof dato.meta.rain24h === 'object') ? dato.meta.rain24h.sum : dato.meta?.rain24h || null, // Extraemos solo el 'sum'
-            rainCurrentDay: (dato.meta?.rainCurrentDay && typeof dato.meta.rainCurrentDay === 'object') ? dato.meta.rainCurrentDay.sum : dato.meta?.rainCurrentDay || null, // Extraemos solo el 'sum'
-            windSpeed: dato.meta?.windSpeed || null,
-            battery: dato.meta?.battery || null,
-            solarPanel: dato.meta?.solarPanel || null,
-            location: {
-              latitude: dato.position?.geo?.coordinates[1] || null,
-              longitude: dato.position?.geo?.coordinates[0] || null,
-            },
-            warnings: dato.warnings || [],  // Si hay advertencias, las agregamos
-            sensors: dato.sensors || [],  // Si hay sensores, los agregamos
-            sms_numbers: dato.sms_numbers || [],  // Si hay números de teléfono, los agregamos
-            licenses: dato.licenses || false,  // Usamos false si no hay información de licencias
-          },
-        }));
-  
-        // Guardamos los datos filtrados en la base de datos
-        const savedData = await WeatherData.insertMany(filteredData);
-        console.log('Datos de clima guardados en la base de datos');
-        
-        // Retornamos los datos en formato resumido
-        const summary = savedData.map(dato => ({
-          date: dato.date,
-          temperature: dato.data.temperature,
-          humidity: dato.data.humidity,
-          rain1h: dato.data.rain1h,
-          rain24h: dato.data.rain24h,
-          windSpeed: dato.data.windSpeed
-        }));
-        return JSON.stringify(summary);  // Retornamos los datos de manera resumida
-      } catch (error) {
-        console.error('Error al obtener o guardar los datos de clima:', error);
-        return res.status(500).send('Hubo un error al obtener o guardar los datos de clima');
-      }
+    } catch (error) {
+      console.error('Error al obtener o guardar los datos de clima:', error);
+      throw new Error('Hubo un error al obtener o guardar los datos de clima');
     }
+  }
 }
 
 
